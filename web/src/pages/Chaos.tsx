@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { rum } from '../observability/datadog'
 
 // Chaos Lab: each button triggers a real failure mode that we will later
 // detect with Datadog RUM / Sentry and debug with DevTools.
@@ -87,7 +88,14 @@ export default function Chaos() {
           <div className="card" key={a.title}>
             <h3>{a.title}</h3>
             <p>{a.desc}</p>
-            <button onClick={a.run}>Trigger</button>
+            <button
+              onClick={() => {
+                rum.action('chaos_trigger', { scenario: a.title })
+                a.run()
+              }}
+            >
+              Trigger
+            </button>
           </div>
         ))}
       </div>

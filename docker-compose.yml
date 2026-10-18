@@ -1,0 +1,16 @@
+# Local Datadog Agent: receives APM traces from api/ (dd-trace -> :8126).
+# Usage (PowerShell):
+#   $env:DD_API_KEY="<your API key>"; $env:DD_SITE="datadoghq.com"; docker compose up -d
+services:
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    container_name: dd-agent
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_SITE=${DD_SITE:-datadoghq.com}
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true
+      - DD_HOSTNAME=fre-practice-laptop
+      - DD_ENV=local
+    ports:
+      - "8126:8126"

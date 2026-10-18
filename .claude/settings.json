@@ -3,7 +3,8 @@
     "allow": [
       "PowerShell(node -v)",
       "PowerShell(npm -v)",
-      "PowerShell(cd ..\\\\api; $p = Start-Process node -ArgumentList server.js -PassThru -WindowStyle Hidden; Start-Sleep 1; \\(Invoke-WebRequest http://localhost:3001/api/metrics -UseBasicParsing\\).Content; try { Invoke-WebRequest http://localhost:3001/api/error -UseBasicParsing } catch { \"error endpoint -> $\\($_.Exception.Response.StatusCode.value__\\)\" }; Stop-Process $p.Id; cd ..; git init -q; git add -A; git commit -q -m \"Phase 0-1: SRE cheat sheet, React app scaffold with chaos lab, practice API`n`nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\"; git log --oneline)"
+      "PowerShell(cd ..\\\\api; $p = Start-Process node -ArgumentList server.js -PassThru -WindowStyle Hidden; Start-Sleep 1; \\(Invoke-WebRequest http://localhost:3001/api/metrics -UseBasicParsing\\).Content; try { Invoke-WebRequest http://localhost:3001/api/error -UseBasicParsing } catch { \"error endpoint -> $\\($_.Exception.Response.StatusCode.value__\\)\" }; Stop-Process $p.Id; cd ..; git init -q; git add -A; git commit -q -m \"Phase 0-1: SRE cheat sheet, React app scaffold with chaos lab, practice API`n`nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\"; git log --oneline)",
+      "PowerShell(npm run build 2>&1)"
     ]
   }
 }

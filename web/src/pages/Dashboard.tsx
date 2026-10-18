@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useClock } from '../clock'
+import { rum } from '../observability/datadog'
 
 type Metrics = {
   requestsPerMin: number
@@ -16,11 +17,22 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let first = true
     const load = () =>
       fetch('/api/metrics')
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-        .then(setMetrics)
-        .catch((e) => setError(String(e)))
+        .then((m) => {
+          setMetrics(m)
+          // Custom timing: "time until the user actually sees numbers",
+          // a more honest metric for a data UI than LCP of a skeleton.
+          if (first) rum.timing('dashboard_metrics_visible')
+          first = false
+        })
+        .catch((e) => {
+          setError(String(e))
+          // Handled errors are invisible to RUM unless reported explicitly.
+          rum.error(e, { feature: 'dashboard', endpoint: '/api/metrics' })
+        })
     load()
     const id = setInterval(load, 10_000)
     return () => clearInterval(id)
