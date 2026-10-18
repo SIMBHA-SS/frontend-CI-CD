@@ -15,7 +15,7 @@ GitHub Actions ──OIDC──▶ IAM role (this repo + env only) ──▶ s3 
 Template: [infra/aws/frontend-stack.yml](../infra/aws/frontend-stack.yml) · Deploy: [.github/workflows/deploy.yml](../.github/workflows/deploy.yml)
 
 ## A. Create the stack (AWS Console, ~10 min)
-1. Region selector (top right) → **Asia Pacific (Mumbai) ap-south-1**.
+1. Region selector (top right) → **Asia Pacific (Sydney) ap-southeast-2**. (The bucket lives here. CloudFront itself is global; its console URL always says us-east-1.)
 2. **CloudFormation → Create stack → With new resources → Upload a template file** → `infra/aws/frontend-stack.yml` → Next.
 3. Stack name: **`depot-ui`** (lowercase; the bucket name derives from it).
 4. Parameters: keep the defaults. Set **CreateGitHubOidcProvider = false** only if *IAM → Identity providers* already lists `token.actions.githubusercontent.com`.
@@ -31,7 +31,7 @@ Repo → **Settings → Secrets and variables → Actions**.
 **Variables** tab (visible, not secret):
 | Name | Value |
 |---|---|
-| `AWS_REGION` | `ap-south-1` |
+| `AWS_REGION` | `ap-southeast-2` |
 | `AWS_DEPLOY_ROLE_ARN` | Output `DeployRoleArn` |
 | `S3_BUCKET` | Output `BucketName` |
 | `CLOUDFRONT_DISTRIBUTION_ID` | Output `DistributionId` |
@@ -71,7 +71,7 @@ In the browser (DevTools → Network):
 ## D. Datadog Synthetics (~10 min): catches outages with zero traffic
 Datadog → **Digital Experience → Synthetic Monitoring → New test → API test (HTTP)**:
 - URL `https://<domain>/` · assert **status = 200**, **response time < 1000 ms**, header `content-type` contains `text/html`
-- Locations: 3 regions (e.g. Mumbai, Frankfurt, N. Virginia) · every 5 min
+- Locations: 3 regions (e.g. Sydney, Frankfurt, N. Virginia) · every 5 min
 - Alert when **2 of 3 locations fail** (avoids paging on one flaky probe) → `@your-email`
 
 Optional **Browser test**: record "open dashboard → see metric cards → go to Services → type 'pay'". This validates the *journey*, not just the HTML. Synthetics results also make a clean **availability SLO** (by monitor uptime).

@@ -201,7 +201,10 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2and3
         IPV6Enabled: true
-        PriceClass: PriceClass_200 # includes India/Asia edges; _100 is US/EU only
+        # PriceClass_All: the only class with Australia/NZ (and South America)
+        # edges. _200 would serve Sydney users from Singapore (+latency).
+        # _100 is US/Canada/Europe/Israel only.
+        PriceClass: PriceClass_All
         Origins:
           - Id: s3-site
             DomainName: !GetAtt SiteBucket.RegionalDomainName
