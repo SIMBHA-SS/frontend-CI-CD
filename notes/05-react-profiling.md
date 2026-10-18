@@ -6,9 +6,9 @@ The buggy version is saved as the git tag `phase5-before`. To profile it:
 ```powershell
 git stash; git checkout phase5-before     # buggy version
 # ...profile...
-git checkout main; git stash pop          # back to fixed version
+git checkout master; git stash pop        # back to fixed version
 ```
-(If you have no local changes, skip the stash commands. The branch may be `master` instead of `main`: check with `git branch`.)
+(If you have no local changes, skip the stash commands.)
 
 ## Your before/after table (fill it in yourself)
 | Measurement | Tool | Before | After |
