@@ -48,6 +48,7 @@ git checkout master; git stash pop        # back to fixed version
 4. React Profiler: each keystroke commit renders 5,000 `Row`s.
 
 **Fixes (in [Services.tsx](../web/src/pages/Services.tsx)):**
+
 | Fix | What it does | Which INP phase it cuts |
 |---|---|---|
 | `useMemo` sort once / filter on query | No recompute on unrelated renders | Processing |
@@ -74,6 +75,7 @@ The Chaos Lab "Memory leak" button is deliberately left broken so you can practi
 5. Search the snapshot for **"Detached"** to find detached DOM nodes (removed from the page but still referenced).
 
 **Classic React leaks and their fixes:**
+
 | Leak | Fix |
 |---|---|
 | `setInterval` / `setTimeout` without cleanup | `return () => clearInterval(id)` in `useEffect` |
@@ -92,6 +94,7 @@ cd web; npm run analyze      # opens nothing: open web/dist/stats.html in a brow
 Treemap of what's in each chunk (Vite's equivalent of Webpack Bundle Analyzer).
 
 **Our real numbers (per-module gzip share of the main bundle):**
+
 | Share | What |
 |---|---|
 | ~37% | Datadog RUM SDK |
