@@ -29,6 +29,7 @@ If it fails: Events tab → the first red `CREATE_FAILED` row has the reason. Se
 Repo → **Settings → Secrets and variables → Actions**.
 
 **Variables** tab (visible, not secret):
+
 | Name | Value |
 |---|---|
 | `AWS_REGION` | `ap-southeast-2` |
@@ -43,6 +44,7 @@ Repo → **Settings → Secrets and variables → Actions**.
 | `SENTRY_PROJECT` | your Sentry project slug (e.g. `react-sentry`) |
 
 **Secrets** tab (write-only, masked in logs):
+
 | Name | Value |
 |---|---|
 | `DATADOG_API_KEY` | Datadog API key (source map upload) |
