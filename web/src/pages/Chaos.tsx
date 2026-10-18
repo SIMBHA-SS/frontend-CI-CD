@@ -16,7 +16,8 @@ export default function Chaos() {
   const [showBanner, setShowBanner] = useState(false)
   const add = (msg: string) => setLog((l) => [`${new Date().toLocaleTimeString()}  ${msg}`, ...l].slice(0, 20))
 
-  // CLS BUG: a banner pops in above content 1.5 s after mount.
+  // A banner arrives 1.5 s after mount (like a late API response or ad).
+  // FIX (Phase 5): its slot is reserved below, so nothing shifts (CLS 0).
   useEffect(() => {
     const id = setTimeout(() => setShowBanner(true), 1500)
     return () => clearTimeout(id)
@@ -89,7 +90,9 @@ export default function Chaos() {
 
   return (
     <>
-      {showBanner && <div className="banner">⚠ Maintenance window tonight 22:00 UTC (late-loading banner → CLS)</div>}
+      <div className="banner-slot">
+        {showBanner && <div className="banner">⚠ Maintenance window tonight 22:00 UTC (late-loading banner, space reserved → no CLS)</div>}
+      </div>
       <h1>Chaos Lab</h1>
       {crash && <Bomb />}
       <div className="chaos-grid">

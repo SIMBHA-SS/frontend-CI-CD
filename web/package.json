@@ -8,12 +8,14 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "sourcemaps:upload": "node scripts/upload-sourcemaps.mjs"
+    "sourcemaps:upload": "node scripts/upload-sourcemaps.mjs",
+    "analyze": "node -e \"process.env.ANALYZE='1';require('child_process').execSync('npm run build',{stdio:'inherit',env:process.env})\""
   },
   "dependencies": {
     "@datadog/browser-rum": "^7.16.0",
     "@datadog/browser-rum-react": "^7.16.0",
     "@sentry/react": "^11.8.0",
+    "@tanstack/react-virtual": "^3.14.21",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4",
@@ -27,6 +29,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "rollup-plugin-visualizer": "^7.1.1",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }

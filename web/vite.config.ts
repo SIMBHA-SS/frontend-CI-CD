@@ -1,6 +1,12 @@
 import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import { defineConfig } from 'vite'
+import { visualizer } from 'rollup-plugin-visualizer'
+
+// `npm run analyze` -> dist/stats.html treemap (Vite's Webpack Bundle Analyzer).
+const analyze = process.env.ANALYZE
+  ? visualizer({ filename: 'dist/stats.html', gzipSize: true, brotliSize: true, template: 'treemap' })
+  : []
 
 // Source map upload to Sentry runs only when an auth token is present
 // (CI or a manual release build), never in everyday dev.
@@ -19,7 +25,7 @@ const sentryUpload = process.env.SENTRY_AUTH_TOKEN
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), sentryUpload],
+  plugins: [react(), sentryUpload, analyze],
   build: {
     // Generate source maps for Datadog/Sentry to unminify stack traces, but
     // don't reference them from the bundle (users can't download them).

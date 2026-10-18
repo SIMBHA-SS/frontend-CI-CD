@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useClock } from '../clock'
 import { obs } from '../observability'
 
 type Metrics = {
@@ -10,9 +9,9 @@ type Metrics = {
 }
 
 export default function Dashboard() {
-  // PERF BUG (Phase 5): consumes the clock only to show "last refreshed",
-  // which forces the entire dashboard to re-render every second.
-  const now = useClock()
+  // FIX (Phase 5): "viewed at" never changes after mount, so compute it once
+  // instead of subscribing to a clock that re-rendered this page every second.
+  const [now] = useState(() => new Date())
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [error, setError] = useState<string | null>(null)
 
