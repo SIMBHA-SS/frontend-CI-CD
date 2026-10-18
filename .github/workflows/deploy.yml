@@ -1,0 +1,129 @@
+# Deploy to S3 + CloudFront on every push to main.
+# main only receives code that passed every CI gate (branch protection), so
+# this workflow builds the production bundle and ships it.
+#
+# Auth: GitHub OIDC -> short-lived AWS credentials. No AWS keys stored in GitHub.
+# Rollback: Actions -> this workflow -> pick an older successful run -> Re-run.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once, and never cancel one halfway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to CloudFront
+    # Skip (don't fail) until the AWS stack exists and its outputs are saved
+    # as repository variables.
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The AWS role trusts only this environment (OIDC `sub` claim). Add
+    # required reviewers in Settings > Environments for a manual approval gate.
+    environment:
+      name: production
+      url: https://${{ vars.CLOUDFRONT_DOMAIN }}
+    permissions:
+      id-token: write # request the OIDC token
+      contents: read
+    env:
+      VITE_APP_VERSION: ${{ github.sha }}
+      VITE_DD_ENV: prod
+      VITE_DD_SITE: datadoghq.com
+      VITE_DD_PROXY: 'true' # RUM via CloudFront /dd-proxy behaviour
+      VITE_DD_APPLICATION_ID: ${{ vars.VITE_DD_APPLICATION_ID }}
+      VITE_DD_CLIENT_TOKEN: ${{ vars.VITE_DD_CLIENT_TOKEN }}
+      VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-web
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # The Sentry Vite plugin creates the release and uploads source maps
+      # when SENTRY_AUTH_TOKEN is set.
+      - name: Build (production config)
+        working-directory: web
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        run: |
+          npx vite build
+          node scripts/mock-api.mjs
+
+      - name: Upload source maps to Datadog, then remove them
+        working-directory: web
+        env:
+          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+          DATADOG_SITE: datadoghq.com
+        run: |
+          if [ -n "$DATADOG_API_KEY" ]; then npm run sourcemaps:upload; fi
+          # Maps must never be public, uploaded or not.
+          find dist -name '*.map' -delete
+          rm -f dist/stats.html
+
+      # Order matters for zero-downtime deploys:
+      # 1) new hashed assets  2) other files  3) index.html LAST.
+      # Users only get the new index.html once everything it references exists.
+      - name: Upload hashed assets (cached 1 year, immutable)
+        working-directory: web
+        # No --delete: old chunks stay for tabs still running the previous
+        # version (prevents ChunkLoadError right after a deploy).
+        run: >
+          aws s3 sync dist/assets "s3://${{ vars.S3_BUCKET }}/assets"
+          --cache-control "public, max-age=31536000, immutable"
+
+      - name: Upload mock API (no-cache JSON)
+        working-directory: web
+        run: >
+          aws s3 cp dist/api "s3://${{ vars.S3_BUCKET }}/api" --recursive
+          --content-type application/json --cache-control "no-cache"
+
+      - name: Upload other static files (cached 1 hour)
+        working-directory: web
+        run: >
+          aws s3 sync dist "s3://${{ vars.S3_BUCKET }}"
+          --exclude "assets/*" --exclude "api/*" --exclude "index.html"
+          --cache-control "public, max-age=3600"
+
+      - name: Upload index.html (no-cache, last)
+        working-directory: web
+        run: >
+          aws s3 cp dist/index.html "s3://${{ vars.S3_BUCKET }}/index.html"
+          --content-type "text/html; charset=utf-8" --cache-control "no-cache"
+
+      # Only the shell needs invalidating: hashed assets have new names.
+      - name: Invalidate index.html
+        run: >
+          aws cloudfront create-invalidation
+          --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}"
+          --paths "/index.html"
+
+      - name: Smoke test
+        run: |
+          set -e
+          base="https://${{ vars.CLOUDFRONT_DOMAIN }}"
+          for path in / /services /chaos /api/metrics; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$base$path")
+            echo "$path -> $code"
+            [ "$code" = "200" ] || { echo "Smoke test failed for $path"; exit 1; }
+          done
+          asset=$(curl -s "$base/" | grep -o '/assets/index-[^"]*\.js' | head -1)
+          echo "Asset $asset headers:"
+          curl -sI "$base$asset" | grep -iE 'cache-control|x-cache|server-timing'
+
+      - name: Summary
+        run: |
+          echo "### Deployed \`${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://${{ vars.CLOUDFRONT_DOMAIN }}" >> "$GITHUB_STEP_SUMMARY"

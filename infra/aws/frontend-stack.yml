@@ -1,0 +1,318 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  DEPOT observability UI hosting. Private S3 + CloudFront (OAC), SPA routing,
+  cache strategy, security headers, Datadog RUM proxy at the edge, cache
+  metrics, and a GitHub Actions OIDC deploy role (no long-lived AWS keys).
+  Delete: empty the bucket, then delete the stack.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: SIMBHA-SS/frontend-CI-CD
+    Description: owner/repo allowed to deploy (case-sensitive)
+  GitHubEnvironment:
+    Type: String
+    Default: production
+    Description: GitHub Actions environment the deploy job runs in
+  CreateGitHubOidcProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Set to false if this AWS account already has the token.actions.githubusercontent.com OIDC provider
+  DatadogIntakeHost:
+    Type: String
+    Default: browser-intake-datadoghq.com
+    Description: RUM intake host for your Datadog site (EU = browser-intake-datadoghq.eu)
+
+Conditions:
+  CreateOidc: !Equals [!Ref CreateGitHubOidcProvider, 'true']
+
+Resources:
+  # ---------------------------------------------------------------- Storage
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      # Never public: only CloudFront (via OAC) can read objects.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      # Versioning = instant rollback of index.html; old versions expire.
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 }
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowThisDistributionOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${SiteBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt SiteBucket.Arn, !Sub '${SiteBucket.Arn}/*']
+            Condition:
+              Bool: { aws:SecureTransport: 'false' }
+
+  # ---------------------------------------------------------------- Edge logic
+  # App routes (/services, /chaos) have no file extension -> serve the SPA
+  # shell. Files and /api/* pass through. Better than mapping 403/404 to
+  # index.html, which also hides genuinely missing assets behind a 200.
+  SpaRoutingFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub ${AWS::StackName}-spa-routing
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Rewrite extensionless app routes to /index.html
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+          var isFile = uri.lastIndexOf('.') > uri.lastIndexOf('/');
+          if (!isFile && uri.indexOf('/api/') !== 0) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  # RUM SDK sends POST /dd-proxy?ddforward=<encoded intake path+query>.
+  # Rewrite to that path on the Datadog intake origin. Only /api/v2/* is
+  # allowed, so this can't be used as an open proxy.
+  DatadogProxyFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub ${AWS::StackName}-dd-proxy
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Forward RUM events to the Datadog intake (ad-blocker bypass)
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var fwd = request.querystring.ddforward;
+          if (!fwd || !fwd.value) {
+            return { statusCode: 400, statusDescription: 'Bad Request' };
+          }
+          var target = decodeURIComponent(fwd.value);
+          if (target.indexOf('/api/v2/') !== 0) {
+            return { statusCode: 400, statusDescription: 'Bad Request' };
+          }
+          var q = target.indexOf('?');
+          request.uri = q === -1 ? target : target.substring(0, q);
+          var qs = {};
+          if (q !== -1) {
+            target.substring(q + 1).split('&').forEach(function (pair) {
+              if (!pair) return;
+              var i = pair.indexOf('=');
+              qs[i === -1 ? pair : pair.substring(0, i)] = { value: i === -1 ? '' : pair.substring(i + 1) };
+            });
+          }
+          request.querystring = qs;
+          return request;
+        }
+
+  # ---------------------------------------------------------------- Caching
+  # index.html (and app routes): never stale. Browser revalidates every load
+  # (Cache-Control: no-cache set at upload), so a deploy is live immediately.
+  HtmlCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub ${AWS::StackName}-html
+        Comment: Honour origin no-cache for the SPA shell
+        MinTTL: 0
+        DefaultTTL: 0
+        MaxTTL: 300
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig: { CookieBehavior: none }
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: none }
+  # /assets/* uses the AWS-managed "CachingOptimized" policy (see behaviour):
+  # hashed filenames + Cache-Control: max-age=31536000, immutable.
+
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub ${AWS::StackName}-security-headers
+        Comment: Security headers + Server-Timing (shows CDN hit/miss in DevTools and RUM)
+        SecurityHeadersConfig:
+          StrictTransportSecurity: { AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true, Preload: false, Override: true }
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { FrameOption: DENY, Override: true }
+          ReferrerPolicy: { ReferrerPolicy: strict-origin-when-cross-origin, Override: true }
+        CustomHeadersConfig:
+          Items:
+            # Report-Only first: watch violations in the console, then enforce.
+            - Header: Content-Security-Policy-Report-Only
+              Override: true
+              Value: >-
+                default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+                img-src 'self' data:; font-src 'self';
+                connect-src 'self' https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io;
+                worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'
+            - Header: Permissions-Policy
+              Override: true
+              Value: camera=(), microphone=(), geolocation=()
+        ServerTimingHeadersConfig:
+          Enabled: true
+          SamplingRate: 100
+
+  # ---------------------------------------------------------------- CDN
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub ${AWS::StackName} observability UI
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200 # includes India/Asia edges; _100 is US/EU only
+        Origins:
+          - Id: s3-site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            S3OriginConfig: { OriginAccessIdentity: '' }
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+          - Id: datadog-intake
+            DomainName: !Ref DatadogIntakeHost
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: s3-site
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: !Ref HtmlCachePolicy
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRoutingFunction.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /assets/*
+            TargetOriginId: s3-site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+            ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+          - PathPattern: /dd-proxy*
+            TargetOriginId: datadog-intake
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: false
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt DatadogProxyFunction.FunctionMetadata.FunctionARN
+
+  # Adds CacheHitRate, OriginLatency, 4xx/5xx by code to CloudWatch
+  # (us-east-1, 1-minute). Small monthly cost per distribution.
+  CacheMetrics:
+    Type: AWS::CloudFront::MonitoringSubscription
+    Properties:
+      DistributionId: !Ref Distribution
+      MonitoringSubscription:
+        RealtimeMetricsSubscriptionConfig:
+          RealtimeMetricsSubscriptionStatus: Enabled
+
+  # ---------------------------------------------------------------- CI/CD access
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1]
+
+  # GitHub Actions assumes this role with a short-lived OIDC token. Trusted
+  # only for this repo's `production` environment; can only write this bucket
+  # and invalidate this distribution.
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: !Sub GitHub Actions deploy for ${GitHubRepo}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidc
+                - !Ref GitHubOidcProvider
+                - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:environment:${GitHubEnvironment}
+      Policies:
+        - PolicyName: deploy-frontend
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt SiteBucket.Arn
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource: !Sub ${SiteBucket.Arn}/*
+              - Effect: Allow
+                Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
+                Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+Outputs:
+  SiteUrl:
+    Description: Public URL of the app
+    Value: !Sub https://${Distribution.DomainName}
+  CloudFrontDomain:
+    Description: GitHub variable CLOUDFRONT_DOMAIN
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Description: GitHub variable CLOUDFRONT_DISTRIBUTION_ID
+    Value: !Ref Distribution
+  BucketName:
+    Description: GitHub variable S3_BUCKET
+    Value: !Ref SiteBucket
+  DeployRoleArn:
+    Description: GitHub variable AWS_DEPLOY_ROLE_ARN
+    Value: !GetAtt DeployRole.Arn
