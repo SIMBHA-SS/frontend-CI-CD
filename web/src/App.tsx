@@ -7,6 +7,7 @@ import { ClockProvider, useClock } from './clock'
 import Dashboard from './pages/Dashboard'
 import Services from './pages/Services'
 import Chaos from './pages/Chaos'
+import VitalsHud from './VitalsHud'
 
 function Clock() {
   const now = useClock()
@@ -51,6 +52,7 @@ export default function App() {
           </ErrorBoundary>
         </main>
       </div>
+      {import.meta.env.DEV && <VitalsHud />}
     </ClockProvider>
   )
 }

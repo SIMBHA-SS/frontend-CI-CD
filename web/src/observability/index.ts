@@ -39,4 +39,12 @@ export const obs = {
   timing(name: string) {
     if (RUM_ENABLED) datadogRum.addTiming(name)
   },
+
+  /** Custom duration vital, e.g. from performance.measure(). startTime is performance.now()-based. */
+  vital(name: string, startTime: number, duration: number, context?: Record<string, unknown>) {
+    if (import.meta.env.DEV) console.debug(`[vital] ${name}: ${Math.round(duration)}ms`, context ?? '')
+    if (RUM_ENABLED) {
+      datadogRum.addDurationVital(name, { startTime: performance.timeOrigin + startTime, duration, context })
+    }
+  },
 }

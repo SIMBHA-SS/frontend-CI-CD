@@ -1,5 +1,6 @@
 // Must be first: Datadog + Sentry should start before anything can fail.
 import './observability'
+import './observability/webVitals'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'

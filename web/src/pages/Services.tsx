@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { obs } from '../observability'
+import { markStart, measureToNextPaint } from '../observability/perf'
 
 type Service = {
   id: number
@@ -36,13 +37,22 @@ export default function Services() {
     return () => clearTimeout(id)
   }, [query, visible.length])
 
+  // Custom vital: keystroke -> filtered table painted. This is the number we
+  // will drive down in Phase 5 (expect ~100-300ms now with 5000 rows).
+  useEffect(() => {
+    measureToNextPaint('services_filter_latency', { query, rows: visible.length })
+  }, [query, visible.length])
+
   return (
     <>
       <h1>Services</h1>
       <input
         placeholder="Filter by name or team…"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          markStart('services_filter_latency')
+          setQuery(e.target.value)
+        }}
         style={{ marginBottom: 12, width: 300 }}
       />
       <span style={{ marginLeft: 12, color: 'var(--muted)' }}>{visible.length} services</span>
