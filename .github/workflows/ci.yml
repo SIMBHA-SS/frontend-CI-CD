@@ -1,6 +1,12 @@
-# Frontend CI: every PR must pass these quality gates before merge.
-#   quality    -> lint, typecheck, unit + a11y tests, build, bundle budget
-#   lighthouse -> lab performance + accessibility budgets on the real build
+# Frontend CI: every quality gate is its own job, so each shows as a separate
+# check on the PR and can be required individually in branch protection.
+#
+#   Lint ───────┐
+#   Typecheck ──┤  (parallel)
+#   Tests ──────┤
+#   Build ──────┴──► Bundle budget
+#                └──► Lighthouse CI
+#
 # Deploy (S3 + CloudFront) is added in Phase 7 as a separate workflow.
 name: CI
 
@@ -24,80 +30,89 @@ env:
   VITE_DD_ENV: ci
 
 jobs:
-  quality:
-    name: Lint · Types · Tests · Build · Bundle budget
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: web
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-web
+      - run: npm run lint
+        working-directory: web
 
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-web
+      - run: npm run typecheck
+        working-directory: web
 
-      - name: Install (clean, from lockfile)
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit + accessibility tests (Vitest + axe-core)
+  test:
+    name: Unit + a11y tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-web
+      - name: Vitest + axe-core
         run: npm test
+        working-directory: web
 
-      - name: Build
-        run: npx vite build
-
-      - name: Bundle size budget
-        run: npm run size
-
-      - name: Upload build
-        uses: actions/upload-artifact@v4
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-web
+      - run: npx vite build
+        working-directory: web
+      # Later jobs test this exact artifact instead of rebuilding.
+      - uses: actions/upload-artifact@v4
         with:
           name: web-dist
           path: web/dist
           retention-days: 7
 
+  bundle-size:
+    name: Bundle budget
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      # Plain Node script, no npm install needed.
+      - run: node scripts/check-bundle-size.mjs
+        working-directory: web
+
   lighthouse:
-    name: Lighthouse CI (performance + a11y budgets)
-    needs: quality
+    name: Lighthouse CI
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup-web
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            web/package-lock.json
-            api/package-lock.json
-
-      - name: Install web + api
-        run: |
-          npm ci --prefix web
-          npm ci --prefix api
-
-      # Test the exact artifact that was built and size-checked.
-      - name: Download build
-        uses: actions/download-artifact@v4
+          with-api: 'true'
+      - uses: actions/download-artifact@v4
         with:
           name: web-dist
           path: web/dist
-
       - name: Start API (pages call /api via the preview proxy)
         run: |
           node api/server.js &
           npx --yes wait-on http://localhost:3001/api/health
-
-      - name: Run Lighthouse CI
-        working-directory: web
+      - name: Performance + accessibility budgets
         run: npx lhci autorun
+        working-directory: web

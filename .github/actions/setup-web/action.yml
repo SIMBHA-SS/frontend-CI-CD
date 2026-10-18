@@ -1,0 +1,26 @@
+# Shared setup for every CI job: Node + npm cache + clean install of web/.
+name: Setup web
+description: Install Node 24 and web/ dependencies from the lockfile
+inputs:
+  with-api:
+    description: Also install api/ dependencies (needed by Lighthouse)
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 24
+        cache: npm
+        cache-dependency-path: |
+          web/package-lock.json
+          api/package-lock.json
+
+    - name: Install web (clean, from lockfile)
+      shell: bash
+      run: npm ci --prefix web
+
+    - name: Install api
+      if: inputs.with-api == 'true'
+      shell: bash
+      run: npm ci --prefix api
