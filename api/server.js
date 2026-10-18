@@ -7,6 +7,38 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
+
+// First-party proxy for Datadog RUM intake, so ad blockers don't drop RUM
+// events (they block *.datadoghq.com, not our own domain). The SDK sends
+// POST /dd-proxy?ddforward=<encoded intake path>; we forward it verbatim.
+// Registered before express.json() so the raw body reaches Datadog untouched.
+const DD_SITE = process.env.DD_SITE || 'datadoghq.com';
+// datadoghq.com -> browser-intake-datadoghq.com, us3.datadoghq.com -> browser-intake-us3-datadoghq.com
+const DD_INTAKE = `https://browser-intake-${DD_SITE.replace(/^(us\d|ap\d)\./, '$1-')}`;
+
+app.post('/dd-proxy', express.raw({ type: '*/*', limit: '5mb' }), async (req, res) => {
+  const forward = req.query.ddforward;
+  // Only forward to the intake API path, otherwise this is an open proxy (SSRF).
+  if (typeof forward !== 'string' || !forward.startsWith('/api/v2/')) {
+    return res.status(400).json({ error: 'invalid ddforward' });
+  }
+  try {
+    const upstream = await fetch(DD_INTAKE + forward, {
+      method: 'POST',
+      headers: {
+        'content-type': req.get('content-type') || 'text/plain',
+        // Keep the real client IP so RUM geo/IP data stays correct.
+        'X-Forwarded-For': req.get('x-forwarded-for') || req.ip,
+      },
+      body: req.body,
+    });
+    res.status(upstream.status).end();
+  } catch (err) {
+    console.error('dd-proxy failed:', err.message);
+    res.status(502).end();
+  }
+});
+
 app.use(express.json());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

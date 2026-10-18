@@ -13,6 +13,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:3001',
+      // RUM intake proxy (ad-blocker bypass). In prod: CloudFront behavior.
+      '/dd-proxy': 'http://localhost:3001',
     },
   },
 })

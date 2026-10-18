@@ -10,6 +10,9 @@ if (RUM_ENABLED) {
     applicationId: env.VITE_DD_APPLICATION_ID,
     clientToken: env.VITE_DD_CLIENT_TOKEN, // public token, safe to ship in the bundle
     site: env.VITE_DD_SITE ?? 'datadoghq.com',
+    // Send RUM to our own origin instead of browser-intake-datadoghq.com,
+    // which ad blockers block (10-30% of sessions silently missing).
+    proxy: env.VITE_DD_PROXY === 'true' ? `${window.location.origin}/dd-proxy` : undefined,
     service: 'depot-observability-ui',
     env: env.VITE_DD_ENV ?? 'local',
     // Must match --release-version used when uploading source maps,
