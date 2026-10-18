@@ -56,10 +56,3 @@ if (RUM_ENABLED) {
   datadogRum.setUser({ id: 'u-1001', name: 'Practice User', plan: 'enterprise' })
   datadogRum.setGlobalContextProperty('tenant', 'acme-corp')
 }
-
-// Thin wrappers so components don't care whether RUM is configured.
-export const rum = {
-  action: (name: string, context?: object) => RUM_ENABLED && datadogRum.addAction(name, context),
-  error: (error: unknown, context?: object) => RUM_ENABLED && datadogRum.addError(error, context),
-  timing: (name: string) => RUM_ENABLED && datadogRum.addTiming(name),
-}

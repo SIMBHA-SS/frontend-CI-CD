@@ -13,12 +13,14 @@
   "dependencies": {
     "@datadog/browser-rum": "^7.16.0",
     "@datadog/browser-rum-react": "^7.16.0",
+    "@sentry/react": "^11.8.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@datadog/datadog-ci": "^5.25.0",
+    "@sentry/vite-plugin": "^11.8.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",

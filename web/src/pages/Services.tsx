@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { rum } from '../observability/datadog'
+import { obs } from '../observability'
 
 type Service = {
   id: number
@@ -32,7 +32,7 @@ export default function Services() {
   // Custom action (debounced): product analytics + lets us find slow filters.
   useEffect(() => {
     if (!query) return
-    const id = setTimeout(() => rum.action('services_filter', { query, results: visible.length }), 500)
+    const id = setTimeout(() => obs.action('services_filter', { query, results: visible.length }), 500)
     return () => clearTimeout(id)
   }, [query, visible.length])
 

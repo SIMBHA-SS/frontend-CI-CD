@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { rum } from '../observability/datadog'
+import { obs } from '../observability'
 
 // Chaos Lab: each button triggers a real failure mode that we will later
 // detect with Datadog RUM / Sentry and debug with DevTools.
@@ -39,7 +39,11 @@ export default function Chaos() {
     {
       title: 'Failing API (500)',
       desc: 'GET /api/error. Shows up as a failed resource in RUM.',
-      run: async () => add(`/api/error -> ${(await fetch('/api/error')).status}`),
+      run: async () => {
+        const status = (await fetch('/api/error')).status
+        add(`/api/error -> ${status}`)
+        obs.error(new Error(`HTTP ${status} on /api/error`), { feature: 'chaos', endpoint: '/api/error', status })
+      },
     },
     {
       title: 'Flaky API (30% 503)',
@@ -47,6 +51,11 @@ export default function Chaos() {
       run: async () => {
         const codes = await Promise.all(Array.from({ length: 10 }, () => fetch('/api/flaky').then((r) => r.status)))
         add(`/api/flaky -> ${codes.join(', ')}`)
+        // Several failures, different messages, but the fingerprint groups
+        // them into ONE Sentry issue for /api/flaky.
+        codes
+          .filter((c) => c >= 500)
+          .forEach((c) => obs.error(new Error(`HTTP ${c} on /api/flaky`), { feature: 'chaos', endpoint: '/api/flaky', status: c }))
       },
     },
     {
@@ -90,7 +99,7 @@ export default function Chaos() {
             <p>{a.desc}</p>
             <button
               onClick={() => {
-                rum.action('chaos_trigger', { scenario: a.title })
+                obs.action('chaos_trigger', { scenario: a.title })
                 a.run()
               }}
             >
