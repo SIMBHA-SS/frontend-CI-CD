@@ -30,7 +30,7 @@ function Clock() {
 function ErrorFallback({ error, resetError }: { error: Error; resetError: () => void }) {
   return (
     <div className="error-fallback" role="alert">
-      <h3>This page crashed</h3>
+      <h2>This page crashed</h2>
       <p>{error.message}</p>
       <button onClick={resetError}>Retry</button>
     </div>

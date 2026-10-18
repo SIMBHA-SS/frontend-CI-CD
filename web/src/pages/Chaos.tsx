@@ -98,7 +98,8 @@ export default function Chaos() {
       <div className="chaos-grid">
         {actions.map((a) => (
           <div className="card" key={a.title}>
-            <h3>{a.title}</h3>
+            {/* h2, not h3: heading levels must not skip (axe heading-order) */}
+            <h2>{a.title}</h2>
             <p>{a.desc}</p>
             <button
               onClick={() => {

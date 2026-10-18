@@ -1,0 +1,103 @@
+# Frontend CI: every PR must pass these quality gates before merge.
+#   quality    -> lint, typecheck, unit + a11y tests, build, bundle budget
+#   lighthouse -> lab performance + accessibility budgets on the real build
+# Deploy (S3 + CloudFront) is added in Phase 7 as a separate workflow.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to the same PR cancels the stale run (saves minutes, faster feedback).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this workflow only reads the repo.
+permissions:
+  contents: read
+
+env:
+  # Same release id everywhere: RUM `version`, Sentry `release`, source maps.
+  VITE_APP_VERSION: ${{ github.sha }}
+  VITE_DD_ENV: ci
+
+jobs:
+  quality:
+    name: Lint · Types · Tests · Build · Bundle budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit + accessibility tests (Vitest + axe-core)
+        run: npm test
+
+      - name: Build
+        run: npx vite build
+
+      - name: Bundle size budget
+        run: npm run size
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  lighthouse:
+    name: Lighthouse CI (performance + a11y budgets)
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            api/package-lock.json
+
+      - name: Install web + api
+        run: |
+          npm ci --prefix web
+          npm ci --prefix api
+
+      # Test the exact artifact that was built and size-checked.
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Start API (pages call /api via the preview proxy)
+        run: |
+          node api/server.js &
+          npx --yes wait-on http://localhost:3001/api/health
+
+      - name: Run Lighthouse CI
+        working-directory: web
+        run: npx lhci autorun

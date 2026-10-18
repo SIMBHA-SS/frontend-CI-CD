@@ -68,6 +68,8 @@ export default function Services() {
   return (
     <>
       <h1>Services</h1>
+      {/* A11y fix (found by axe in CI): placeholder text is not a label. */}
+      <label htmlFor="services-filter" className="sr-only">Filter services by name or team</label>
       <input
         id="services-filter"
         placeholder="Filter by name or team…"
