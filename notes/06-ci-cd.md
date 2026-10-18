@@ -4,12 +4,15 @@
 
 ```
 PR opened / pushed
-  └─ quality job ────────────────────────────────────────────────┐
-       npm ci → lint → typecheck → unit + axe tests → build → bundle budget → upload dist
-  └─ lighthouse job (needs: quality) ─────────────────────────────┤
-       download same dist → start API → Lighthouse ×3 runs per page → assert budgets
-  └─ (Phase 7) deploy job on main: S3 sync + CloudFront + source maps + release markers
+  Lint ───────┐
+  Typecheck ──┤  run in parallel (each its own check on the PR)
+  Tests ──────┤
+  Build ──────┴──► Bundle budget   (uses the build artifact)
+               └──► Lighthouse CI  (uses the same artifact + API)
+  (Phase 7) deploy workflow on main: S3 sync + CloudFront + source maps + release markers
 ```
+Shared install lives in a composite action ([.github/actions/setup-web](../.github/actions/setup-web/action.yml)), so each job is 3–4 lines.
+**Why separate jobs?** Each gate reports its own status (you see *which* gate failed at a glance), gates run in parallel (faster), each can be required individually, and a flaky Lighthouse run can be re-run alone. **Cost:** each job does its own `npm ci` (mitigated by the npm cache). A single job is cheaper for tiny repos.
 
 | Gate | Tool | Fails the PR when |
 |---|---|---|
@@ -52,7 +55,7 @@ npm run lhci
 ## D. Make it a real quality gate on GitHub
 After the first push: **repo Settings → Branches → Add branch ruleset** for `main`:
 - ✅ Require a pull request before merging (1 approval)
-- ✅ **Require status checks to pass**: `Lint · Types · Tests · Build · Bundle budget` and `Lighthouse CI`
+- ✅ **Require status checks to pass**: `Lint`, `Typecheck`, `Unit + a11y tests`, `Build`, `Bundle budget`, `Lighthouse CI`
 - ✅ Require branches to be up to date · ✅ Block force pushes
 
 Without this, CI is only advice. With it, CI is a **gate**.
